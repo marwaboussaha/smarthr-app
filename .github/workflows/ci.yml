@@ -31,13 +31,10 @@ jobs:
           fetch-depth: 1 #  dernière version de code 
         
 
-      - name: Setup PHP 8.4 # installe PHP dans le runner
+      - name: Setup PHP 8.3
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
-          extensions: pdo_mysql, mbstring, bcmath, gd, zip
-          tools: composer:v2
-
 
           
 
@@ -47,8 +44,14 @@ jobs:
       # --- AJOUTEZ CES DEUX ÉTAPES ICI ---
       - name: Prepare Laravel Application
         run: |
-          cp .env.example .env
-          php artisan key:generate
+          # Si le fichier .env.example existe, on le copie, sinon on crée un fichier .env vide
+          if [ -f .env.example ]; then
+            cp .env.example .env
+          else
+            touch .env
+          fi
+          # On génère la clé (le --force est nécessaire si le .env est vide)
+          php artisan key:generate --force
       # -----------------------------------
 
       - name: Run PHPUnit Tests
