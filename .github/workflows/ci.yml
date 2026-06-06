@@ -24,11 +24,12 @@ jobs:
         uses: actions/checkout@v4 #cloner ton repository GitHub et le copier dans le runner (machine virtuelle)
         with:
           fetch-depth: 1 #  dernière version de code 
+        
 
       - name: Setup PHP 8.4 # installe PHP dans le runner
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: '8.3'
           extensions: pdo_mysql, mbstring, bcmath, gd, zip
           tools: composer:v2
 
