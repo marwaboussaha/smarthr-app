@@ -31,10 +31,13 @@ jobs:
           fetch-depth: 1 #  dernière version de code 
         
 
-      - name: Setup PHP 8.3
+      - name: Setup PHP 8.4 # installe PHP dans le runner
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
+          extensions: pdo_mysql, mbstring, bcmath, gd, zip
+          tools: composer:v2
+
 
           
 
