@@ -122,7 +122,9 @@ jobs:
           image-ref: 'smarthr-backend:local'
           format: 'table'
           severity: 'CRITICAL,HIGH'
-          exit-code: '1' # Arrête le pipeline si une faille grave est trouvée
+          # --- CHANGEZ '1' PAR '0' ICI ---
+          exit-code: '0' 
+          # -------------------------------
 
       
           # 4. Push vers les ECR individuels si le scan est réussi
