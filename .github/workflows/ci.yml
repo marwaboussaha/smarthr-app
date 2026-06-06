@@ -21,9 +21,7 @@ jobs:
   tests-and-security:
     runs-on: ubuntu-latest
     # --- AJOUTEZ CETTE LIGNE ICI ---
-    defaults:
-      run:
-        working-directory: smarthr-main
+    
     # -------------------------------
     steps:
       
