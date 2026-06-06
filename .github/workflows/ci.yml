@@ -57,7 +57,11 @@ jobs:
           php artisan key:generate --force
       # -----------------------------------
 
+     
       - name: Run PHPUnit Tests
+        # On définit une clé directement ici pour que Laravel soit content
+        env:
+          APP_KEY: base64:p8vSBCp8n6K13Wn97fWvSBCp8n6K13Wn97fWvSBCp8n=
         run: php artisan test
 
       # 2. OWASP Dependency Security Scan (Capture Fig 2.2)
