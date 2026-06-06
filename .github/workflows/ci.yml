@@ -13,13 +13,20 @@ permissions:
   contents: read
   security-events: write # permet d’envoyer les résultats de sécurité (scan, vulnérabilités) vers GitHub Security tab
 
-jobs:
+
   # ─────────────────────────────────────────────────────────────
   # ÉTAPE 1 : TESTS ET SÉCURITÉ DU CODE (Basé sur Figure 2.2)
   # ─────────────────────────────────────────────────────────────
-  tests-and-security: # 1ere step de pipline est de faire les tests unitaires et de sécurité du code
+jobs:
+  tests-and-security:
     runs-on: ubuntu-latest
+    # --- AJOUTEZ CETTE LIGNE ICI ---
+    defaults:
+      run:
+        working-directory: ./backend
+    # -------------------------------
     steps:
+      
       - name: Checkout code # cloner automatique code du repository GitHub vers le runner GitHub Actions
         uses: actions/checkout@v4 #cloner ton repository GitHub et le copier dans le runner (machine virtuelle)
         with:
