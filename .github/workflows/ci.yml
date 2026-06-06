@@ -1,216 +1,184 @@
 name: CI/CD DevSecOps SmartHR
-
 concurrency:
-group: ${{ github.workflow }}-${{ github.ref }}
-cancel-in-progress: true
-
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 on:
-push:
-branches: [ main ]
-pull_request:
-branches: [ main ]
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 permissions:
-actions: read
-contents: read
-security-events: write
+  actions: read
+  contents: read
+  security-events: write # permet d’envoyer les résultats de sécurité (scan, vulnérabilités) vers GitHub Security tab
 
+
+  # ─────────────────────────────────────────────────────────────
+  # ÉTAPE 1 : TESTS ET SÉCURITÉ DU CODE (Basé sur Figure 2.2)
+  # ─────────────────────────────────────────────────────────────
 jobs:
+  tests-and-security:
+    runs-on: ubuntu-latest
+    # --- AJOUTEZ CETTE LIGNE ICI ---
+    
+    # -------------------------------
+    steps:
+      
+      - name: Checkout code # cloner automatique code du repository GitHub vers le runner GitHub Actions
+        uses: actions/checkout@v4 #cloner ton repository GitHub et le copier dans le runner (machine virtuelle)
+        with:
+          fetch-depth: 1 #  dernière version de code 
+        
 
-# ============================================================
-
-# 1. TESTS & SÉCURITÉ
-
-# ============================================================
-
-tests-and-security:
-runs-on: ubuntu-latest
-
-```
-defaults:
-  run:
-    working-directory: backend
-
-steps:
-  - name: Checkout code
-    uses: actions/checkout@v4
-    with:
-      fetch-depth: 1
-
-  - name: Setup PHP
-    uses: shivammathur/setup-php@v2
-    with:
-      php-version: '8.3'
-      extensions: pdo_mysql, mbstring, bcmath, gd, zip
-      tools: composer:v2
-
-  - name: Install Dependencies
-    run: composer install --no-progress --prefer-dist
-
-  - name: Prepare Laravel Application
-    run: |
-      if [ -f .env.example ]; then
-        cp .env.example .env
-      else
-        touch .env
-      fi
-
-      php artisan key:generate --force
-
-  - name: Run PHPUnit Tests
-    env:
-      APP_ENV: testing
-      APP_KEY: base64:6pGByYpt6pGByYpt6pGByYpt6pGByYpt6pGByYpt6pG=
-    run: php artisan test
-
-  - name: Dependency Security Scan (OWASP)
-    continue-on-error: true
-    run: composer audit
-```
-
-# ============================================================
-
-# 2. BUILD + TRIVY + PUSH ECR
-
-# ============================================================
-
-build-and-push:
-needs: tests-and-security
-runs-on: ubuntu-latest
+      - name: Setup PHP 8.4 # installe PHP dans le runner
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql, mbstring, bcmath, gd, zip
+          tools: composer:v2
 
 
-if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+          
 
-outputs:
-  backend_image: ${{ steps.meta.outputs.backend_image }}
-  web_image: ${{ steps.meta.outputs.web_image }}
-  agent_image: ${{ steps.meta.outputs.agent_image }}
-  redis_image: ${{ steps.meta.outputs.redis_image }}
+      - name: Install Dependencies
+        run: composer install --no-progress --prefer-dist
 
-steps:
-  - name: Checkout code
-    uses: actions/checkout@v4
+      # --- AJOUTEZ CES DEUX ÉTAPES ICI ---
+      - name: Prepare Laravel Application
+        run: |
+          # Si le fichier .env.example existe, on le copie, sinon on crée un fichier .env vide
+          if [ -f .env.example ]; then
+            cp .env.example .env
+          else
+            touch .env
+          fi
+          # On génère la clé (le --force est nécessaire si le .env est vide)
+          php artisan key:generate --force
+      # -----------------------------------
 
-  - name: Configure AWS Credentials
-    uses: aws-actions/configure-aws-credentials@v2
-    with:
-      aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      aws-region: us-east-1
+     
+      - name: Run PHPUnit Tests
+        env:
+          APP_ENV: testing
+          # Cette clé fait exactement 32 octets une fois décodée
+          APP_KEY: base64:6pGByYpt6pGByYpt6pGByYpt6pGByYpt6pGByYpt6pG=
+        run: php artisan test
+      # 2. OWASP Dependency Security Scan (Capture Fig 2.2)
+      # On utilise composer audit qui vérifie les failles de sécurité des bibliothèques   ==> tester les vulnérabilités de sécurité
+      # 2. OWASP Dependency Security Scan (Capture Fig 2.2)
+      - name: Dependency Security Scan (OWASP)
+        # --- AJOUTEZ CETTE LIGNE ---
+        continue-on-error: true 
+        # ---------------------------
+        run: composer audit
+  # ─────────────────────────────────────────────────────────────
+  # ÉTAPE 2 : BUILD, SÉCURITÉ DES IMAGES (TRIVY) ET PUSH vers  ECR
+  # ─────────────────────────────────────────────────────────────
+  build-and-push:
+    needs: tests-and-security # on s'assure que les tests et la sécurité du code sont validés avant de construire les images Docker et de les pousser vers ECR
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    outputs:
+      backend_image: ${{ steps.meta.outputs.backend_image }}
+      web_image:     ${{ steps.meta.outputs.web_image }}
+      agent_image:   ${{ steps.meta.outputs.agent_image }}
+      redis_image:   ${{ steps.meta.outputs.redis_image }}
 
-  - name: Login to Amazon ECR
-    id: login-ecr
-    uses: aws-actions/amazon-ecr-login@v2
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-  - name: Compute Image Tags
-    id: meta
-    run: |
-      REGISTRY="${{ steps.login-ecr.outputs.registry }}"
-      SHA="${{ github.sha }}"
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
 
-      echo "backend_image=${REGISTRY}/smarthr-backend:${SHA}" >> $GITHUB_OUTPUT
-      echo "web_image=${REGISTRY}/smarthr-web:${SHA}" >> $GITHUB_OUTPUT
-      echo "agent_image=${REGISTRY}/smarthr-agent:${SHA}" >> $GITHUB_OUTPUT
-      echo "redis_image=${REGISTRY}/smarthr-redis:${SHA}" >> $GITHUB_OUTPUT
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-  - name: Build Backend Image
-    run: |
-      docker build \
-        -t smarthr-backend:local \
-        -f Dockerfiles/app/backend/Dockerfile .
+      - name: Compute image tags   # creation des tags d'images Docker basés sur le SHA du commit pour assurer l'unicité et la traçabilité des images construites
+        id: meta
+        run: |
+          REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          SHA="${{ github.sha }}"
+          echo "backend_image=${REGISTRY}/smarthr-backend:${SHA}" >> "$GITHUB_OUTPUT"
+          echo "web_image=${REGISTRY}/smarthr-web:${SHA}"         >> "$GITHUB_OUTPUT"
+          echo "agent_image=${REGISTRY}/smarthr-agent:${SHA}"     >> "$GITHUB_OUTPUT"
+          echo "redis_image=${REGISTRY}/smarthr-redis:${SHA}"     >> "$GITHUB_OUTPUT"
 
-  - name: Run Trivy Scan
-    uses: aquasecurity/trivy-action@master
-    with:
-      image-ref: smarthr-backend:local
-      format: table
-      severity: CRITICAL,HIGH
-      exit-code: '0'
-
-  - name: Build & Push All Images
-    run: |
-      # Backend
-      docker tag smarthr-backend:local ${{ steps.meta.outputs.backend_image }}
-      docker tag smarthr-backend:local ${{ steps.login-ecr.outputs.registry }}/smarthr-backend:latest
-      docker push ${{ steps.login-ecr.outputs.registry }}/smarthr-backend --all-tags
-
-      # Web
-      docker build -t ${{ steps.meta.outputs.web_image }} \
-        -f Dockerfiles/web/Dockerfile .
-
-      docker tag ${{ steps.meta.outputs.web_image }} \
-        ${{ steps.login-ecr.outputs.registry }}/smarthr-web:latest
-
-      docker push ${{ steps.login-ecr.outputs.registry }}/smarthr-web --all-tags
-
-      # Redis
-      docker build -t ${{ steps.meta.outputs.redis_image }} \
-        -f Dockerfiles/cache/Dockerfile .
-
-      docker tag ${{ steps.meta.outputs.redis_image }} \
-        ${{ steps.login-ecr.outputs.registry }}/smarthr-redis:latest
-
-      docker push ${{ steps.login-ecr.outputs.registry }}/smarthr-redis --all-tags
-
-      # Agent
-      docker build -t ${{ steps.meta.outputs.agent_image }} \
-        -f Dockerfiles/agent/Dockerfile .
-
-      docker tag ${{ steps.meta.outputs.agent_image }} \
-        ${{ steps.login-ecr.outputs.registry }}/smarthr-agent:latest
-
-      docker push ${{ steps.login-ecr.outputs.registry }}/smarthr-agent --all-tags
+      # 3. Trivy Vulnerability Scan (Capture Fig 2.2)
+      # On build l'image localement, on la scan, et si OK, on la push plus tard
+      - name: Build Backend for Scan
+        run: docker build -t smarthr-backend:local -f Dockerfiles/app/backend/Dockerfile .
 
 
-# ============================================================
+      - name: Run Trivy Scan (Backend)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'smarthr-backend:local'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          # --- CHANGEZ '1' PAR '0' ICI ---
+          exit-code: '0' 
+          # -------------------------------
 
-# 3. DEPLOY ECS
+      
+          # 4. Push vers les ECR individuels si le scan est réussi
+      - name: Build & Push All Images
+        run: |
+          # Backend
+          docker tag smarthr-backend:local ${{ steps.meta.outputs.backend_image }}
+          docker tag smarthr-backend:local ${{ steps.login-ecr.outputs.registry }}/smarthr-backend:latest
+          docker push ${{ steps.login-ecr.outputs.registry }}/smarthr-backend --all-tags
+          
+          # Web
+          docker build -t ${{ steps.meta.outputs.web_image }} -f Dockerfiles/web/Dockerfile .
+          docker tag ${{ steps.meta.outputs.web_image }} ${{ steps.login-ecr.outputs.registry }}/smarthr-web:latest
+          docker push ${{ steps.login-ecr.outputs.registry }}/smarthr-web --all-tags
 
-# ============================================================
+          # Redis (Cache)
+          docker build -t ${{ steps.meta.outputs.redis_image }} -f Dockerfiles/cache/Dockerfile .
+          docker tag ${{ steps.meta.outputs.redis_image }} ${{ steps.login-ecr.outputs.registry }}/smarthr-redis:latest
+          docker push ${{ steps.login-ecr.outputs.registry }}/smarthr-redis --all-tags
 
-deploy:
-runs-on: ubuntu-latest
-needs: build-and-push
+          # Agent
+          docker build -t ${{ steps.meta.outputs.agent_image }} -f Dockerfiles/agent/Dockerfile .
+          docker tag ${{ steps.meta.outputs.agent_image }} ${{ steps.login-ecr.outputs.registry }}/smarthr-agent:latest
+          docker push ${{ steps.login-ecr.outputs.registry }}/smarthr-agent --all-tags
+  # ─────────────────────────────────────────────────────────────
+  # ÉTAPE 3 : DÉPLOIEMENT SUR AWS ECS
+  # ─────────────────────────────────────────────────────────────
+   deploy:
+  runs-on: ubuntu-latest
+  needs: build-and-push
 
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-steps:
-  - name: Configure AWS Credentials
-    uses: aws-actions/configure-aws-credentials@v2
-    with:
-      aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      aws-region: us-east-1
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
 
-  - name: Deploy App Service
-    run: |
-      aws ecs update-service \
-        --cluster smarthr \
-        --service smarthr-app-service \
-        --force-new-deployment \
-        --region us-east-1
+    - name: Deploy App Service
+      run: |
+        aws ecs update-service \
+          --cluster smarthr \
+          --service smarthr-app-service \
+          --force-new-deployment \
+          --region us-east-1
 
-  - name: Deploy Cache Service
-    run: |
-      aws ecs update-service \
-        --cluster smarthr \
-        --service smarthr-cache-service \
-        --force-new-deployment \
-        --region us-east-1
-
-  - name: Deploy Agent Service
-    run: |
-      aws ecs update-service \
-        --cluster smarthr \
-        --service smarthr-agent-service \
-        --force-new-deployment \
-        --region us-east-1
-
-  - name: Wait For Stabilization
-    run: |
-      aws ecs wait services-stable \
-        --cluster smarthr \
-        --services \
-        smarthr-app-service \
-        smarthr-cache-service \
-        smarthr-agent-service \
-        --region us-east-1
+    - name: Deploy Cache Service
+      run: |
+        aws ecs update-service \
+          --cluster smarthr \
+          --service smarthr-cache-service \
+          --force-new-deployment \
+          --region us-east-1
