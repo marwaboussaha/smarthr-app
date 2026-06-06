@@ -24,8 +24,8 @@ RUN apt-get update && apt-get install -y \
 
 RUN echo "listen = 0.0.0.0:9000" >> /usr/local/etc/php-fpm.d/www.conf
 
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY . .
 
 RUN mkdir -p storage/framework/{sessions,views,cache} bootstrap/cache \
@@ -33,7 +33,8 @@ RUN mkdir -p storage/framework/{sessions,views,cache} bootstrap/cache \
     && chmod -R 775 storage bootstrap/cache
 
 COPY Dockerfiles/app/backend/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
 
+RUN chmod +x /usr/local/bin/entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 EXPOSE 9000
 CMD ["/entrypoint.sh"]
