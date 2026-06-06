@@ -37,4 +37,4 @@ COPY Dockerfiles/app/backend/entrypoint.sh /entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 EXPOSE 9000
-CMD ["/entrypoint.sh"]
+CMD ["php-fpm8.3", "-F"]
