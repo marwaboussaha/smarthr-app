@@ -11,59 +11,75 @@ on:
 permissions:
   actions: read
   contents: read
-  security-events: write
+  security-events: write # permet d’envoyer les résultats de sécurité (scan, vulnérabilités) vers GitHub Security tab
 
+
+  # ─────────────────────────────────────────────────────────────
+  # ÉTAPE 1 : TESTS ET SÉCURITÉ DU CODE (Basé sur Figure 2.2)
+  # ─────────────────────────────────────────────────────────────
 jobs:
-  # ─────────────────────────────────────────────────────────────
-  # ÉTAPE 1 : TESTS ET SÉCURITÉ DU CODE
-  # ─────────────────────────────────────────────────────────────
   tests-and-security:
     runs-on: ubuntu-latest
+    # --- AJOUTEZ CETTE LIGNE ICI ---
+    defaults:
+      run:
+        working-directory: ./backend
+    # -------------------------------
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      
+      - name: Checkout code # cloner automatique code du repository GitHub vers le runner GitHub Actions
+        uses: actions/checkout@v4 #cloner ton repository GitHub et le copier dans le runner (machine virtuelle)
         with:
-          fetch-depth: 1
+          fetch-depth: 1 #  dernière version de code 
+        
 
-      - name: Setup PHP 8.3
+      - name: Setup PHP 8.4 # installe PHP dans le runner
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
           extensions: pdo_mysql, mbstring, bcmath, gd, zip
           tools: composer:v2
 
-      # On précise le dossier uniquement pour les commandes PHP/Composer
+
+          
+
       - name: Install Dependencies
-        working-directory: ./backend
         run: composer install --no-progress --prefer-dist
 
+      # --- AJOUTEZ CES DEUX ÉTAPES ICI ---
       - name: Prepare Laravel Application
-        working-directory: ./backend
         run: |
-          cp .env.example .env || echo "Pas de fichier .env.example"
+          cp .env.example .env
           php artisan key:generate
+      # -----------------------------------
 
       - name: Run PHPUnit Tests
-        working-directory: ./backend
         run: php artisan test
 
+      # 2. OWASP Dependency Security Scan (Capture Fig 2.2)
+      # On utilise composer audit qui vérifie les failles de sécurité des bibliothèques   ==> tester les vulnérabilités de sécurité
       - name: Dependency Security Scan (OWASP)
-        working-directory: ./backend
         run: composer audit
 
   # ─────────────────────────────────────────────────────────────
-  # ÉTAPE 2 : BUILD, SÉCURITÉ DES IMAGES (TRIVY) ET PUSH
+  # ÉTAPE 2 : BUILD, SÉCURITÉ DES IMAGES (TRIVY) ET PUSH vers  ECR
   # ─────────────────────────────────────────────────────────────
   build-and-push:
-    needs: tests-and-security
+    needs: tests-and-security # on s'assure que les tests et la sécurité du code sont validés avant de construire les images Docker et de les pousser vers ECR
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    outputs:
+      backend_image: ${{ steps.meta.outputs.backend_image }}
+      web_image:     ${{ steps.meta.outputs.web_image }}
+      agent_image:   ${{ steps.meta.outputs.agent_image }}
+      redis_image:   ${{ steps.meta.outputs.redis_image }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4 # Mis à jour en v4
+        uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -73,7 +89,18 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # Build & Scan Backend
+      - name: Compute image tags   # creation des tags d'images Docker basés sur le SHA du commit pour assurer l'unicité et la traçabilité des images construites
+        id: meta
+        run: |
+          REGISTRY="${{ steps.login-ecr.outputs.registry }}"
+          SHA="${{ github.sha }}"
+          echo "backend_image=${REGISTRY}/smarthr-backend:${SHA}" >> "$GITHUB_OUTPUT"
+          echo "web_image=${REGISTRY}/smarthr-web:${SHA}"         >> "$GITHUB_OUTPUT"
+          echo "agent_image=${REGISTRY}/smarthr-agent:${SHA}"     >> "$GITHUB_OUTPUT"
+          echo "redis_image=${REGISTRY}/smarthr-redis:${SHA}"     >> "$GITHUB_OUTPUT"
+
+      # 3. Trivy Vulnerability Scan (Capture Fig 2.2)
+      # On build l'image localement, on la scan, et si OK, on la push plus tard
       - name: Build Backend for Scan
         run: docker build -t smarthr-backend:local -f Dockerfiles/app/backend/Dockerfile .
 
@@ -83,26 +110,29 @@ jobs:
           image-ref: 'smarthr-backend:local'
           format: 'table'
           severity: 'CRITICAL,HIGH'
-          exit-code: '1'
+          exit-code: '1' # Arrête le pipeline si une faille grave est trouvée
 
-      # Push final de toutes les images
+      # 4. Push vers les ECR individuels si le scan est réussi
       - name: Build & Push All Images
         run: |
-          REGISTRY=${{ steps.login-ecr.outputs.registry }}
-          SHA=${{ github.sha }}
-          
           # Backend
-          docker tag smarthr-backend:local $REGISTRY/smarthr-backend:$SHA
-          docker tag smarthr-backend:local $REGISTRY/smarthr-backend:latest
-          docker push $REGISTRY/smarthr-backend --all-tags
+          docker tag smarthr-backend:local ${{ steps.meta.outputs.backend_image }}
+          docker tag smarthr-backend:local ${{ steps.login-ecr.outputs.registry }}/smarthr-backend:latest
+          docker push ${{ steps.login-ecr.outputs.registry }}/smarthr-backend --all-tags
           
-          # Web (React)
-          docker build -t $REGISTRY/smarthr-web:$SHA -f Dockerfiles/web/Dockerfile .
-          docker tag $REGISTRY/smarthr-web:$SHA $REGISTRY/smarthr-web:latest
-          docker push $REGISTRY/smarthr-web --all-tags
+          # Web
+          docker build -t ${{ steps.meta.outputs.web_image }} -f Dockerfiles/web/Dockerfile .
+          docker tag ${{ steps.meta.outputs.web_image }} ${{ steps.login-ecr.outputs.registry }}/smarthr-web:latest
+          docker push ${{ steps.login-ecr.outputs.registry }}/smarthr-web --all-tags
 
-          # Redis & Agent (Ajoutez les vôtres ici si nécessaire)
-          # ... (mêmes étapes docker build/tag/push pour Redis et Agent)
+          # Redis (Cache)
+          docker build -t ${{ steps.meta.outputs.redis_image }} -f Dockerfiles/cache/Dockerfile .
+          docker tag ${{ steps.meta.outputs.redis_image }} ${{ steps.login-ecr.outputs.registry }}/smarthr-redis:latest
+          docker push ${{ steps.login-ecr.outputs.registry }}/smarthr-redis --all-tags
+          # Agent
+          docker build -t ${{ steps.meta.outputs.agent_image }} -f Dockerfiles/agent/Dockerfile .
+          docker tag ${{ steps.meta.outputs.agent_image }} ${{ steps.login-ecr.outputs.registry }}/smarthr-agent:latest
+          docker push ${{ steps.login-ecr.outputs.registry }}/smarthr-agent --all-tags
 
   # ─────────────────────────────────────────────────────────────
   # ÉTAPE 3 : DÉPLOIEMENT SUR AWS ECS
@@ -112,13 +142,23 @@ jobs:
     needs: build-and-push
     steps:
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      - name: Update ECS Services
+      - name: Deploy app service
         run: |
-          aws ecs update-service --cluster smarthr --service smarthr-app-service --force-new-deployment
-          aws ecs update-service --cluster smarthr --service smarthr-cache-service --force-new-deployment
+          aws ecs update-service --cluster smarthr --service smarthr-app-service --force-new-deployment --region us-east-1
+          
+      - name: Deploy cache service
+        run: |
+          aws ecs update-service --cluster smarthr --service smarthr-cache-service --force-new-deployment --region us-east-1
+
+      - name: Wait for stabilization
+        run: |
+          aws ecs wait services-stable --cluster smarthr --services smarthr-app-service smarthr-cache-service --region us-east-1
+      - name: Deploy agent service
+        run: |
+          aws ecs update-service --cluster smarthr --service smarthr-agent-service --force-new-deployment --region us-east-1   
