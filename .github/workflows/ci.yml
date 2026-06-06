@@ -23,7 +23,7 @@ jobs:
     # --- AJOUTEZ CETTE LIGNE ICI ---
     defaults:
       run:
-        working-directory: ./backend
+        working-directory: smarthr-app/backend
     # -------------------------------
     steps:
       
