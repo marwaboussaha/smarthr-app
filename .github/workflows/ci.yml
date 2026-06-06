@@ -102,8 +102,7 @@ jobs:
       # 3. Trivy Vulnerability Scan (Capture Fig 2.2)
       # On build l'image localement, on la scan, et si OK, on la push plus tard
       - name: Build Backend for Scan
-        # Ajoutez smarthr-main/ devant Dockerfiles
-        run: docker build -t smarthr-backend:local -f smarthr-main/Dockerfiles/app/backend/Dockerfile smarthr-main
+        run: docker build -t smarthr-backend:local -f Dockerfiles/app/backend/Dockerfile .
 
 
       - name: Run Trivy Scan (Backend)
@@ -118,26 +117,25 @@ jobs:
           # 4. Push vers les ECR individuels si le scan est réussi
       - name: Build & Push All Images
         run: |
-          # Backend (déjà tagué par l'étape précédente)
+          # Backend
           docker tag smarthr-backend:local ${{ steps.meta.outputs.backend_image }}
           docker tag smarthr-backend:local ${{ steps.login-ecr.outputs.registry }}/smarthr-backend:latest
           docker push ${{ steps.login-ecr.outputs.registry }}/smarthr-backend --all-tags
           
           # Web
-          docker build -t ${{ steps.meta.outputs.web_image }} -f smarthr-main/Dockerfiles/web/Dockerfile smarthr-main
+          docker build -t ${{ steps.meta.outputs.web_image }} -f Dockerfiles/web/Dockerfile .
           docker tag ${{ steps.meta.outputs.web_image }} ${{ steps.login-ecr.outputs.registry }}/smarthr-web:latest
           docker push ${{ steps.login-ecr.outputs.registry }}/smarthr-web --all-tags
 
-          # Redis
-          docker build -t ${{ steps.meta.outputs.redis_image }} -f smarthr-main/Dockerfiles/cache/Dockerfile smarthr-main
+          # Redis (Cache)
+          docker build -t ${{ steps.meta.outputs.redis_image }} -f Dockerfiles/cache/Dockerfile .
           docker tag ${{ steps.meta.outputs.redis_image }} ${{ steps.login-ecr.outputs.registry }}/smarthr-redis:latest
           docker push ${{ steps.login-ecr.outputs.registry }}/smarthr-redis --all-tags
 
           # Agent
-          docker build -t ${{ steps.meta.outputs.agent_image }} -f smarthr-main/Dockerfiles/agent/Dockerfile smarthr-main
+          docker build -t ${{ steps.meta.outputs.agent_image }} -f Dockerfiles/agent/Dockerfile .
           docker tag ${{ steps.meta.outputs.agent_image }} ${{ steps.login-ecr.outputs.registry }}/smarthr-agent:latest
           docker push ${{ steps.login-ecr.outputs.registry }}/smarthr-agent --all-tags
-
   # ─────────────────────────────────────────────────────────────
   # ÉTAPE 3 : DÉPLOIEMENT SUR AWS ECS
   # ─────────────────────────────────────────────────────────────
