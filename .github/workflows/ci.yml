@@ -59,9 +59,9 @@ jobs:
 
      
       - name: Run PHPUnit Tests
-        # On définit une clé directement ici pour que Laravel soit content
+        # On définit une clé de test directement ici
         env:
-          APP_KEY: base64:p8vSBCp8n6K13Wn97fWvSBCp8n6K13Wn97fWvSBCp8n=
+          APP_KEY: base64:yhV3SBCp8n6K13Wn97fWvSBCp8n6K13Wn97fWvSBCp8n=
         run: php artisan test
 
       # 2. OWASP Dependency Security Scan (Capture Fig 2.2)
