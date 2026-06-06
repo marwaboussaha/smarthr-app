@@ -59,11 +59,11 @@ jobs:
 
      
       - name: Run PHPUnit Tests
-        # On définit une clé de test directement ici
         env:
-          APP_KEY: base64:yhV3SBCp8n6K13Wn97fWvSBCp8n6K13Wn97fWvSBCp8n=
+          APP_ENV: testing
+          # Cette clé fait exactement 32 octets une fois décodée
+          APP_KEY: base64:6pGByYpt6pGByYpt6pGByYpt6pGByYpt6pGByYpt6pG=
         run: php artisan test
-
       # 2. OWASP Dependency Security Scan (Capture Fig 2.2)
       # On utilise composer audit qui vérifie les failles de sécurité des bibliothèques   ==> tester les vulnérabilités de sécurité
       - name: Dependency Security Scan (OWASP)
