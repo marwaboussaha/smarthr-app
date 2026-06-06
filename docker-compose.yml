@@ -96,4 +96,3 @@ services:
 networks:
   smartrh_network:
     driver: bridge
-

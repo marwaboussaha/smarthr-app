@@ -1,10 +1,15 @@
 #!/bin/bash
 set -e
 
-echo "Setting permissions..."
+echo "=== SmartHR Backend Entrypoint ==="
+
+# ── 1. Permissions ────────────────────────────────────────────────────────────
+echo "[1/7] Setting permissions..."
 chmod -R 775 /var/www/smartrh/storage /var/www/smartrh/bootstrap/cache
 chown -R www-data:www-data /var/www/smartrh/storage /var/www/smartrh/bootstrap/cache
 
+# ── 2. Write .env from container environment variables ────────────────────────
+echo "[2/7] Writing .env..."
 cat > /var/www/smartrh/.env <<EOF
 APP_NAME=${APP_NAME:-Smarthr}
 APP_ENV=${APP_ENV:-production}
@@ -37,32 +42,79 @@ QUEUE_CONNECTION=database
 FILESYSTEM_DISK=local
 EOF
 
-echo "Waiting for database..."
+# ── 3. Wait for MySQL to be ready (TCP check) ─────────────────────────────────
+echo "[3/7] Waiting for database at ${DB_HOST}:3306..."
+RETRIES=30
 until (echo > /dev/tcp/${DB_HOST}/3306) 2>/dev/null; do
-    echo "DB not ready, retrying in 3s..."
+    RETRIES=$((RETRIES - 1))
+    if [ "$RETRIES" -le 0 ]; then
+        echo "ERROR: Database never became ready. Aborting."
+        exit 1
+    fi
+    echo "  DB not ready, retrying in 3s... (${RETRIES} attempts left)"
     sleep 3
 done
-echo "Database is ready!"
+echo "  Database is ready!"
 
+# ── 4. Run migrations ─────────────────────────────────────────────────────────
+echo "[4/7] Running migrations..."
 
-echo "Running migrations..."
-if ! php /var/www/smartrh/artisan migrate --force --no-interaction; then
-    echo "WARNING: migrate exited with an error, continuing startup..."
+# Optional: Wipe database if DB_WIPE=true is set in ECS environment
+if [ "${DB_WIPE}" = "true" ]; then
+    echo "  DB_WIPE is true — wiping database..."
+    php /var/www/smartrh/artisan db:wipe --force --no-interaction
 fi
-echo "Checking if seeding needed..."
-USER_COUNT=$(php /var/www/smartrh/artisan tinker \
-    --execute="echo \App\Models\User::count();" 2>/dev/null | tail -1 | tr -d '[:space:]')
-if [ "$USER_COUNT" = "0" ] || [ -z "$USER_COUNT" ]; then
-    echo "Seeding database..."
+
+php /var/www/smartrh/artisan migrate --force --no-interaction --isolated
+php /var/www/smartrh/artisan module:migrate --force --no-interaction
+echo "  Migrations complete."
+
+# Clear cache to ensure fresh state
+php /var/www/smartrh/artisan optimize:clear
+
+# ── 5. Seed only if the users table is empty (Eloquent check) ──────────────────
+echo "[5/7] Checking if database needs seeding..."
+    # Check if we have any employees. If not, the database is functionally empty for a demo.
+    # Check if we have more than 3 users. (Base system has 3: Admin, Client, 1 Employee).
+    # If we have 3 or less, the full demo data (15+ users) is missing.
+    DATA_EXISTS=$(php -r "
+        try {
+            include 'vendor/autoload.php';
+            \$app = include 'bootstrap/app.php';
+            \$kernel = \$app->make(Illuminate\Contracts\Console\Kernel::class);
+            \$kernel->bootstrap();
+            if (Illuminate\Support\Facades\Schema::hasTable('users')) {
+                echo Illuminate\Support\Facades\DB::table('users')->count() > 3 ? 'true' : 'false';
+            } else {
+                echo 'false';
+            }
+        } catch (\Exception \$e) {
+            echo 'false';
+        }
+    " 2>/dev/null || echo "false")
+
+if [ "$DATA_EXISTS" = "false" ]; then
+    echo "  Database is empty or missing core data — seeding now..."
     php /var/www/smartrh/artisan db:seed --force --no-interaction
+    php /var/www/smartrh/artisan module:seed --force --no-interaction
+    echo "  Seeding complete."
 else
-    echo "Users already exist, skipping seeding."
+    echo "  Data already exists — running idempotent demo seeder..."
+    php /var/www/smartrh/artisan db:seed --class=SmartHRDemoSeeder --force --no-interaction
+    echo "  Demo seeder complete."
 fi
 
 
-echo "Caching config..."
+
+# ── 6. Create storage symlink (public/storage → storage/app/public) ───────────
+echo "[6/7] Creating storage symlink..."
+php /var/www/smartrh/artisan storage:link --force || true
+
+# ── 7. Cache config & routes for production performance ──────────────────────
+echo "[7/7] Caching config and routes..."
 php /var/www/smartrh/artisan config:cache
 php /var/www/smartrh/artisan route:cache
+php /var/www/smartrh/artisan view:cache
 
-echo "Starting PHP-FPM..."
+echo "=== Starting PHP-FPM ==="
 exec php-fpm

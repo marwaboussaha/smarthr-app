@@ -1,6 +1,6 @@
 #version: '3.8'
 
-services: #pour indiquer les services qui composent l'application en tt que container 
+services:
   # Backend Service (Laravel PHP-FPM)
   backend:
     build:
@@ -97,3 +97,22 @@ networks:
 volumes:
   db_data:
     driver: local
+  #agent 
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfiles/agent/Dockerfile
+    container_name: smartrh_agent
+    restart: unless-stopped
+    ports:
+      - "9000:8080"
+    networks:
+      - smartrh_network
+        
+    depends_on:
+      - redis
+
+    
+     
+
+      
